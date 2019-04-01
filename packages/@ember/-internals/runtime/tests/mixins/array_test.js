@@ -5,7 +5,6 @@ import {
   addObserver,
   observer as emberObserver,
   computed,
-  addArrayObserver,
   removeArrayObserver,
   arrayContentDidChange,
   arrayContentWillChange,
@@ -195,7 +194,7 @@ moduleFor(
         _after: null,
       });
 
-      addArrayObserver(obj, observer);
+      obj.addArrayObserver(observer);
     }
 
     afterEach() {

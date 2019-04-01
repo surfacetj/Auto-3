@@ -45,7 +45,7 @@ if (EMBER_METAL_TRACKED_PROPERTIES) {
         this.assertText('max jackson | max jackson');
       }
 
-      '@test returning new promise array proxies does not cause perpetual rerenders'() {
+      '@test returning ArrayProxy in un-memoized getter does not cause perpetual rerenders'() {
         let PromiseArray = ArrayProxy.extend(PromiseProxyMixin);
 
         class LoaderComponent extends GlimmerishComponent {

@@ -1,8 +1,29 @@
 import { getOwner } from '@ember/-internals/owner';
 import { scheduleOnce } from '@ember/runloop';
-import { get, objectAt, addArrayObserver, removeArrayObserver } from '@ember/-internals/metal';
+import {
+  get,
+  objectAt,
+  addArrayObserver as internalAddArrayObserver,
+  removeArrayObserver as internalRemoveArrayObserver,
+} from '@ember/-internals/metal';
 import { dasherize } from '@ember/string';
 import { Namespace, Object as EmberObject, A as emberA } from '@ember/-internals/runtime';
+
+function addArrayObserver(arr, target, observer) {
+  if (arr.addArrayObserver) {
+    arr.addArrayObserver(target, observer);
+  } else {
+    internalAddArrayObserver(arr, target, observer);
+  }
+}
+
+function removeArrayObserver(arr, target, observer) {
+  if (arr.removeArrayObserver) {
+    arr.removeArrayObserver(target, observer);
+  } else {
+    internalRemoveArrayObserver(arr, target, observer);
+  }
+}
 
 /**
 @module @ember/debug

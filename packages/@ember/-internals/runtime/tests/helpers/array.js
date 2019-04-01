@@ -5,8 +5,6 @@ import {
   get,
   set,
   computed,
-  addArrayObserver,
-  removeArrayObserver,
   arrayContentWillChange,
   arrayContentDidChange,
 } from '@ember/-internals/metal';
@@ -63,12 +61,12 @@ const ArrayTestsObserverClass = EmberObject.extend({
   },
 
   observeArray(obj) {
-    addArrayObserver(obj, this);
+    obj.addArrayObserver(this);
     return this;
   },
 
   stopObserveArray(obj) {
-    removeArrayObserver(obj, this);
+    obj.removeArrayObserver(this);
     return this;
   },
 

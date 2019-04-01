@@ -11,9 +11,12 @@ import {
   removeArrayObserver,
   replace,
 } from '@ember/-internals/metal';
+import { _WeakSet as WeakSet } from '@ember/polyfills';
 import EmberObject from './object';
 import { isArray, MutableArray } from '../mixins/array';
 import { assert } from '@ember/debug';
+
+const CONSUMED = new WeakSet();
 
 const ARRAY_OBSERVER_MAPPING = {
   willChange: '_arrangedContentArrayWillChange',
@@ -101,11 +104,12 @@ export default class ArrayProxy extends EmberObject {
     this._length = 0;
 
     this._arrangedContent = null;
-    this._addArrangedContentArrayObsever();
   }
 
   willDestroy() {
-    this._removeArrangedContentArrayObsever();
+    if (CONSUMED.has(this)) {
+      this._removeArrangedContentArrayObserver();
+    }
   }
 
   /**
@@ -164,6 +168,10 @@ export default class ArrayProxy extends EmberObject {
 
   // Overriding objectAt is not supported.
   objectAt(idx) {
+    if (!CONSUMED.has(this)) {
+      this._addArrangedContentArrayObserver();
+    }
+
     if (this._objects === null) {
       this._objects = [];
     }
@@ -187,6 +195,10 @@ export default class ArrayProxy extends EmberObject {
 
   // Overriding length is not supported.
   get length() {
+    if (!CONSUMED.has(this)) {
+      this._addArrangedContentArrayObserver();
+    }
+
     if (this._lengthDirty) {
       let arrangedContent = get(this, 'arrangedContent');
       this._length = arrangedContent ? get(arrangedContent, 'length') : 0;
@@ -217,24 +229,31 @@ export default class ArrayProxy extends EmberObject {
   }
 
   [PROPERTY_DID_CHANGE](key) {
+    if (!CONSUMED.has(this)) {
+      // The array proxy hasn't been accessed yet, nothing needs to be updated
+      return;
+    }
+
     if (key === 'arrangedContent') {
       let oldLength = this._objects === null ? 0 : this._objects.length;
       let arrangedContent = get(this, 'arrangedContent');
       let newLength = arrangedContent ? get(arrangedContent, 'length') : 0;
 
-      this._removeArrangedContentArrayObsever();
+      this._removeArrangedContentArrayObserver();
       this.arrayContentWillChange(0, oldLength, newLength);
 
       this._invalidate();
 
       this.arrayContentDidChange(0, oldLength, newLength);
-      this._addArrangedContentArrayObsever();
+      this._addArrangedContentArrayObserver();
     } else if (key === 'content') {
       this._invalidate();
     }
   }
 
-  _addArrangedContentArrayObsever() {
+  _addArrangedContentArrayObserver() {
+    CONSUMED.add(this);
+
     let arrangedContent = get(this, 'arrangedContent');
     if (arrangedContent) {
       assert("Can't set ArrayProxy's content to itself", arrangedContent !== this);
@@ -243,15 +262,23 @@ export default class ArrayProxy extends EmberObject {
         isArray(arrangedContent) || arrangedContent.isDestroyed
       );
 
-      addArrayObserver(arrangedContent, this, ARRAY_OBSERVER_MAPPING);
+      if (arrangedContent.addArrayObserver) {
+        arrangedContent.addArrayObserver(this, ARRAY_OBSERVER_MAPPING);
+      } else {
+        addArrayObserver(arrangedContent, this, ARRAY_OBSERVER_MAPPING);
+      }
 
       this._arrangedContent = arrangedContent;
     }
   }
 
-  _removeArrangedContentArrayObsever() {
+  _removeArrangedContentArrayObserver() {
     if (this._arrangedContent) {
-      removeArrayObserver(this._arrangedContent, this, ARRAY_OBSERVER_MAPPING);
+      if (this._arrangedContent.removeArrayObserver) {
+        this._arrangedContent.removeArrayObserver(this, ARRAY_OBSERVER_MAPPING);
+      } else {
+        removeArrayObserver(this._arrangedContent, this, ARRAY_OBSERVER_MAPPING);
+      }
     }
   }
 
@@ -291,4 +318,12 @@ ArrayProxy.reopen(MutableArray, {
     @public
   */
   arrangedContent: alias('content'),
+
+  addArrayObserver(target, opts) {
+    if (!CONSUMED.has(this)) {
+      this._addArrangedContentArrayObserver();
+    }
+
+    this._super(target, opts);
+  },
 });
