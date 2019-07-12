@@ -5,6 +5,7 @@ const path = require('path');
 const Rollup = require('broccoli-rollup');
 const Funnel = require('broccoli-funnel');
 const MergeTrees = require('broccoli-merge-trees');
+const Babel = require('broccoli-babel-transpiler');
 const typescript = require('broccoli-typescript-compiler').default;
 const BroccoliDebug = require('broccoli-debug');
 const findLib = require('./find-lib');
@@ -17,6 +18,8 @@ const StringReplace = require('broccoli-string-replace');
 const GlimmerTemplatePrecompiler = require('./glimmer-template-compiler');
 const VERSION_PLACEHOLDER = /VERSION_STRING_PLACEHOLDER/g;
 const transfromBabelPlugins = require('./transforms/transform-babel-plugins');
+const canaryFeatures = require('./canary-features');
+const injectNodeGlobals = require('./transforms/inject-node-globals');
 
 const debugTree = BroccoliDebug.buildDebugCallback('ember-source');
 
@@ -34,23 +37,11 @@ module.exports.routerES = function _routerES() {
   });
 };
 
-module.exports.jquery = function _jquery() {
-  return new Funnel(findLib('jquery'), {
-    files: ['jquery.js'],
-    destDir: 'jquery',
-    annotation: 'jquery',
+module.exports.loader = () =>
+  new Funnel(findLib('loader.js'), {
+    files: ['loader.js'],
+    annotation: 'loader.js',
   });
-};
-
-module.exports.internalLoader = function _internalLoader() {
-  return new Funnel('packages/loader/lib', {
-    files: ['index.js'],
-    getDestinationPath() {
-      return 'loader.js';
-    },
-    annotation: 'internal loader',
-  });
-};
 
 module.exports.qunit = function _qunit() {
   return new Funnel(findLib('qunit'), {
@@ -112,7 +103,9 @@ module.exports.getPackagesES = function getPackagesES() {
     `get-packages-es:package-json`
   );
 
-  mergedFinalOutput = new MergeTrees([mergedFinalOutput, packageJSON], { overwrite: true });
+  mergedFinalOutput = canaryFeatures(
+    new MergeTrees([mergedFinalOutput, packageJSON], { overwrite: true })
+  );
 
   return debugTree(mergedFinalOutput, `get-packages-es:output`);
 };
@@ -216,11 +209,11 @@ module.exports.simpleHTMLTokenizerES = function _simpleHTMLTokenizerES() {
   });
 };
 
-const glimmerTrees = new Map();
+const _glimmerTrees = new Map();
 
 function rollupGlimmerPackage(pkg) {
   let name = pkg.name;
-  let tree = glimmerTrees.get(name);
+  let tree = _glimmerTrees.get(name);
   if (tree === undefined) {
     tree = new Rollup(pkg.module.dir, {
       rollup: {
@@ -233,12 +226,12 @@ function rollupGlimmerPackage(pkg) {
       },
       annotation: name,
     });
-    glimmerTrees.set(name, tree);
+    _glimmerTrees.set(name, tree);
   }
   return tree;
 }
 
-module.exports.glimmerTrees = function glimmerTrees(entries) {
+function glimmerTrees(entries) {
   let seen = new Set();
 
   // glimmer runtime has dependency on this even though it is only in tests
@@ -270,6 +263,37 @@ module.exports.glimmerTrees = function glimmerTrees(entries) {
     }
   }
   return trees;
+}
+
+module.exports.glimmerCompilerES = () => {
+  return new MergeTrees(glimmerTrees(['@glimmer/compiler']));
+};
+
+module.exports.glimmerES = function glimmerES(environment) {
+  let glimmerEntries = ['@glimmer/node', '@glimmer/opcode-compiler', '@glimmer/runtime'];
+
+  if (environment === 'development') {
+    let hasGlimmerDebug = true;
+    try {
+      require.resolve('@glimmer/debug');
+    } catch (e) {
+      hasGlimmerDebug = false;
+    }
+    if (hasGlimmerDebug) {
+      glimmerEntries.push('@glimmer/debug', '@glimmer/local-debug-flags');
+    }
+  }
+
+  let trees = new MergeTrees(glimmerTrees(glimmerEntries));
+
+  return new Babel(trees, {
+    sourceMaps: true,
+    plugins: [
+      // ensures `@glimmer/compiler` requiring `crypto` works properly
+      // in both browser and node-land
+      injectNodeGlobals,
+    ],
+  });
 };
 
 module.exports.emberVersionES = function _emberVersionES() {
@@ -279,25 +303,14 @@ module.exports.emberVersionES = function _emberVersionES() {
   });
 };
 
-module.exports.buildEmberEnvFlagsES = function(flags) {
-  let content = '';
-  for (let key in flags) {
-    content += `\nexport const ${key} = ${flags[key]};`;
-  }
-
-  return new WriteFile('@glimmer/env.js', content, {
-    annotation: '@glimmer/env',
-  });
-};
-
 module.exports.emberLicense = function _emberLicense() {
   let license = new Funnel('generators', {
-    files: ['license.js'],
+    files: ['license.txt'],
     annotation: 'license',
   });
 
   return new StringReplace(license, {
-    files: ['license.js'],
+    files: ['license.txt'],
     patterns: [
       {
         match: VERSION_PLACEHOLDER,
@@ -305,11 +318,5 @@ module.exports.emberLicense = function _emberLicense() {
       },
     ],
     annotation: 'license',
-  });
-};
-
-module.exports.nodeTests = function _nodeTests() {
-  return new Funnel('tests', {
-    include: ['**/*/*.js'],
   });
 };
